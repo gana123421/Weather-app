@@ -3,9 +3,16 @@
    IMPORTANT: regenerate a new key on OpenWeatherMap (do not use keys that were shared publicly).
 */
 
-const API_KEY = "3c2ba77afad9f1dc3a62ce1d090987b1"; // <<< PUT YOUR NEW KEY HERE
+/* script.js - Weather Forecast App (FREE API version)
+   Uses ONLY free OpenWeatherMap APIs:
+   - Geocoding (free)
+   - Current Weather (free)
+   - 5-day Forecast (free)
+*/
 
-// DOM
+const API_KEY = "3c2ba77afad9f1dc3a62ce1d090987b1";
+
+// DOM elements
 const cityInput = document.getElementById('cityInput');
 const searchBtn = document.getElementById('searchBtn');
 const locationBtn = document.getElementById('locationBtn');
@@ -28,31 +35,31 @@ const appBody = document.getElementById('appBody');
 const currentIconWrap = document.getElementById('currentIconWrap');
 
 let currentData = null;
-let isMetric = true; // today display unit
+let isMetric = true;
 let recentCities = [];
 
 /* ---------- Utilities ---------- */
 function clearMessage() { messageContainer.innerHTML = ''; }
 
 function showMessage(text, type='error') {
-  // type: 'error' or 'success'
-  const colorClass = type === 'error' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-green-50 border-green-200 text-green-800';
+  const colorClass = type === 'error'
+    ? 'bg-red-50 border-red-200 text-red-800'
+    : 'bg-green-50 border-green-200 text-green-800';
+
   messageContainer.innerHTML = `
-    <div role="alert" class="${colorClass} border px-4 py-3 rounded-md flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <span class="font-semibold">${type === 'error' ? 'Error' : 'Success'}</span>
-        <span class="text-sm">${text}</span>
-      </div>
-      <button id="closeMsg" aria-label="Close message" class="ml-4 text-lg font-bold leading-none">✕</button>
+    <div class="${colorClass} border px-4 py-3 rounded-md flex justify-between">
+      <span>${text}</span>
+      <button onclick="clearMessage()">✕</button>
     </div>
   `;
-  const closeBtn = document.getElementById('closeMsg');
-  if (closeBtn) closeBtn.addEventListener('click', () => { messageContainer.innerHTML = ''; });
 }
 
-function formatDateFromUnix(unix, tzOffsetSeconds=0) {
-  const d = new Date((unix + tzOffsetSeconds) * 1000);
-  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+function formatDate(ts) {
+  return new Date(ts * 1000).toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric"
+  });
 }
 
 function cToF(c) { return (c * 9/5) + 32; }
@@ -76,182 +83,143 @@ function saveToRecent(city) {
 
 function renderRecentDropdown() {
   recentDropdown.innerHTML = '';
+
   if (recentCities.length === 0) {
-    const o = document.createElement('option');
-    o.value = '';
-    o.textContent = 'No recent searches';
-    recentDropdown.appendChild(o);
+    recentDropdown.innerHTML = `<option>No recent searches</option>`;
     return;
   }
-  const defaultOpt = document.createElement('option');
-  defaultOpt.value = '';
-  defaultOpt.textContent = 'Select a recent city';
-  recentDropdown.appendChild(defaultOpt);
 
+  recentDropdown.innerHTML += `<option value="">Select recent city</option>`;
   recentCities.forEach(city => {
-    const opt = document.createElement('option');
-    opt.value = city;
-    opt.textContent = city;
-    recentDropdown.appendChild(opt);
+    recentDropdown.innerHTML += `<option value="${city}">${city}</option>`;
   });
-  recentDropdown.selectedIndex = 0;
 }
 
-/* ---------- API functions ---------- */
+/* ---------- API Calls (FREE) ---------- */
+
+// 1. Geocoding API (city → lat/lon)
 async function geocodeCity(city) {
   const url = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(city)}&limit=1&appid=${API_KEY}`;
-  let res;
-  try {
-    res = await fetch(url);
-  } catch (networkErr) {
-    throw new Error('Network error while calling geocoding API. Check your connection.');
-  }
-  if (!res.ok) {
-    // try parse body
-    let body = '';
-    try { body = await res.text(); } catch(e) {}
-    if (res.status === 401) throw new Error('Invalid API key. Please check your OpenWeatherMap key.');
-    if (res.status === 429) throw new Error('Rate limit exceeded. Try again later.');
-    throw new Error(`Geocoding failed (status ${res.status}). ${body}`);
-  }
+  const res = await fetch(url);
+
+  if (!res.ok) throw new Error("Invalid API key or network error");
+  
   const data = await res.json();
-  if (!data || data.length === 0) throw new Error('City not found. Try a different name or specify "City,CountryCode".');
+  if (!data || data.length === 0) throw new Error("City not found");
+  
   return data[0];
 }
 
-async function fetchWeatherByLatLon(lat, lon) {
-  // OneCall endpoint (units=metric)
-  const url = `https://api.openweathermap.org/data/2.5/onecall?lat=${lat}&lon=${lon}&exclude=minutely,hourly,alerts&appid=${API_KEY}&units=metric`;
-  let res;
-  try {
-    res = await fetch(url);
-  } catch (err) {
-    throw new Error('Network error while fetching weather data.');
-  }
-  if (!res.ok) {
-    if (res.status === 401) throw new Error('Invalid API key for weather API.');
-    throw new Error(`Weather API error: status ${res.status}`);
-  }
-  const data = await res.json();
-  return data;
+// 2. Current Weather API (FREE)
+async function fetchCurrentWeather(lat, lon) {
+  const url = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=metric&appid=${API_KEY}`;
+  const res = await fetch(url);
+
+  if (!res.ok) throw new Error("Failed to load current weather");
+
+  return await res.json();
 }
 
-/* ---------- Icons (inline SVG small icons) ---------- */
-const ICON_SVG = {
-  temp: `<svg xmlns="http://www.w3.org/2000/svg" class="inline-block w-4 h-4 mr-1" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14 14.76V6a2 2 0 10-4 0v8.76a4 4 0 104 0z"/></svg>`,
-  wind: `<svg xmlns="http://www.w3.org/2000/svg" class="inline-block w-4 h-4 mr-1" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 12h13a4 4 0 100-8 4 4 0 010 8H5"/></svg>`,
-  humidity: `<svg xmlns="http://www.w3.org/2000/svg" class="inline-block w-4 h-4 mr-1" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 2s5 5.5 5 9a5 5 0 11-10 0c0-3.5 5-9 5-9z"/></svg>`
-};
+// 3. 5-Day Forecast API (FREE)
+async function fetchForecast(lat, lon) {
+  const url = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&units=metric&appid=${API_KEY}`;
+  const res = await fetch(url);
 
-/* ---------- Background handling (robust) ---------- */
-function applyBackground(main, tempC) {
-  const body = appBody;
-  const bgClasses = ['bg-blue-200','bg-gray-200','bg-yellow-100','bg-orange-200','bg-sky-100'];
-  bgClasses.forEach(c => body.classList.remove(c));
-  main = (main || '').toLowerCase();
-  if (main.includes('rain') || main.includes('drizzle')) {
-    body.classList.add('bg-blue-200');
-  } else if (main.includes('cloud')) {
-    body.classList.add('bg-gray-200');
-  } else if (main.includes('clear')) {
-    body.classList.add('bg-yellow-100');
-  } else if (tempC >= 40) {
-    body.classList.add('bg-orange-200');
-  } else {
-    body.classList.add('bg-sky-100');
-  }
+  if (!res.ok) throw new Error("Failed to load forecast");
+
+  return await res.json();
 }
 
-/* ---------- Rendering ---------- */
-function renderCurrent(data, locationName) {
+/* ---------- Render Current Weather ---------- */
+function renderCurrentWeather(data, name) {
   currentData = data;
-  currentCard.classList.remove('hidden');
-  const tzOffset = data.timezone_offset || 0;
+  currentCard.classList.remove("hidden");
 
-  cityNameEl.textContent = locationName;
-  dateText.textContent = formatDateFromUnix(data.current.dt, tzOffset);
-  descriptionEl.textContent = data.current.weather?.[0]?.description || '';
+  cityNameEl.textContent = name;
+  dateText.textContent = formatDate(data.dt);
+  descriptionEl.textContent = data.weather[0].description;
 
-  humidityEl.textContent = `${data.current.humidity} %`;
-  windEl.textContent = `${data.current.wind_speed} m/s`;
-  feelsLikeEl.textContent = `${round(data.current.feels_like)} °C`;
+  humidityEl.textContent = data.main.humidity + " %";
+  windEl.textContent = data.wind.speed + " m/s";
+  feelsLikeEl.textContent = round(data.main.feels_like) + " °C";
 
-  const tempC = data.current.temp;
+  const tempC = data.main.temp;
   tempToday.textContent = isMetric ? round(tempC) : round(cToF(tempC));
-  tempUnit.textContent = isMetric ? '°C' : '°F';
+  tempUnit.textContent = isMetric ? "°C" : "°F";
 
-  // current icon
-  const iconCode = data.current.weather?.[0]?.icon;
-  const iconUrl = iconCode ? `https://openweathermap.org/img/wn/${iconCode}@2x.png` : null;
-  if (iconUrl) {
-    currentIconWrap.innerHTML = `<img id="currentIcon" src="${iconUrl}" alt="${data.current.weather?.[0]?.main || 'weather'}" class="w-14 h-14">`;
-    currentIconWrap.classList.remove('hidden');
-  } else {
-    currentIconWrap.innerHTML = '';
-    currentIconWrap.classList.add('hidden');
-  }
+  const iconUrl = `https://openweathermap.org/img/wn/${data.weather[0].icon}@2x.png`;
+  currentIconWrap.innerHTML = `<img src="${iconUrl}" class="w-14 h-14">`;
 
-  const main = data.current.weather?.[0]?.main?.toLowerCase() || '';
-  applyBackground(main, data.current.temp);
-
-  // temp alert
-  if (data.current.temp >= 40) {
-    showMessage(`Heat alert: temperature is ${round(data.current.temp)}°C — take precautions!`, 'error');
-  } else if (data.current.temp <= -10) {
-    showMessage(`Cold alert: temperature is ${round(data.current.temp)}°C — dress warmly!`, 'error');
-  }
+  applyBackground(data.weather[0].main.toLowerCase(), data.main.temp);
 }
 
+/* ---------- Render FREE Forecast (5 days) ---------- */
 function renderForecast(data) {
   forecastContainer.innerHTML = '';
-  const tzOffset = data.timezone_offset || 0;
-  const days = data.daily.slice(0, 5);
+
+  // group by day
+  const dailyMap = {};
+  data.list.forEach(item => {
+    const day = item.dt_txt.split(" ")[0];
+    if (!dailyMap[day]) dailyMap[day] = [];
+    dailyMap[day].push(item);
+  });
+
+  const days = Object.keys(dailyMap).slice(0, 5);
+
   days.forEach(day => {
-    const iconCode = day.weather?.[0]?.icon;
-    const iconUrl = iconCode ? `https://openweathermap.org/img/wn/${iconCode}@2x.png` : '';
+    const entries = dailyMap[day];
+    const mid = entries[Math.floor(entries.length / 2)];
 
-    const dayTemp = round(day.temp.day);
+    const date = formatDate(mid.dt);
+    const temp = round(mid.main.temp);
+    const icon = mid.weather[0].icon;
 
-    const card = document.createElement('div');
-    card.className = 'p-3 rounded-lg bg-white shadow-sm text-center flex flex-col items-center justify-between';
+    const card = document.createElement("div");
+    card.className = "p-3 rounded-lg bg-white shadow-sm text-center";
+
     card.innerHTML = `
-      <div class="w-full">
-        <div class="font-medium text-sm">${formatDateFromUnix(day.dt, tzOffset)}</div>
-        <div class="text-xs text-gray-500 mt-1 truncate">${day.weather?.[0]?.main || ''} - ${day.weather?.[0]?.description || ''}</div>
-      </div>
-
-      <div class="mt-2 flex items-center gap-2">
-        ${iconUrl ? `<img src="${iconUrl}" alt="${day.weather?.[0]?.main || 'icon'}" class="w-12 h-12">` : ''}
-        <div class="text-lg font-bold">${dayTemp} °C</div>
-      </div>
-
-      <div class="w-full mt-3 grid grid-cols-3 gap-2 text-xs text-gray-600">
-        <div class="flex items-center justify-center">${ICON_SVG.temp}<span>${round(day.temp.day)}°</span></div>
-        <div class="flex items-center justify-center">${ICON_SVG.wind}<span>${day.wind_speed} m/s</span></div>
-        <div class="flex items-center justify-center">${ICON_SVG.humidity}<span>${day.humidity}%</span></div>
-      </div>
+      <div class="font-medium">${date}</div>
+      <div class="text-gray-600 text-sm">${mid.weather[0].description}</div>
+      <img src="https://openweathermap.org/img/wn/${icon}@2x.png" class="mx-auto w-12 h-12 mt-2">
+      <div class="text-lg font-bold">${temp} °C</div>
     `;
+
     forecastContainer.appendChild(card);
   });
 }
 
-/* ---------- Event handlers ---------- */
+/* ---------- Background ---------- */
+function applyBackground(main, tempC) {
+  const body = appBody;
+  body.className = "min-h-screen transition-colors duration-500";
+
+  if (main.includes("rain")) body.classList.add("bg-blue-200");
+  else if (main.includes("cloud")) body.classList.add("bg-gray-200");
+  else if (main.includes("clear")) body.classList.add("bg-yellow-100");
+  else if (tempC >= 40) body.classList.add("bg-orange-200");
+  else body.classList.add("bg-sky-100");
+}
+
+/* ---------- Event Handlers ---------- */
 async function handleSearch() {
   clearMessage();
   const city = cityInput.value.trim();
-  if (!city) {
-    showMessage('Please enter a city name', 'error');
-    return;
-  }
+  if (!city) return showMessage("Enter a city");
+
   try {
     searchBtn.disabled = true;
+
     const geo = await geocodeCity(city);
-    const weather = await fetchWeatherByLatLon(geo.lat, geo.lon);
-    renderCurrent(weather, `${geo.name}${geo.state ? ', ' + geo.state : ''}, ${geo.country}`);
-    renderForecast(weather);
-    saveToRecent(`${geo.name}${geo.state ? ', ' + geo.state : ''}`);
+    const current = await fetchCurrentWeather(geo.lat, geo.lon);
+    const forecast = await fetchForecast(geo.lat, geo.lon);
+
+    renderCurrentWeather(current, `${geo.name}, ${geo.country}`);
+    renderForecast(forecast);
+
+    saveToRecent(`${geo.name}, ${geo.country}`);
   } catch (err) {
-    showMessage(err.message || 'Error fetching weather', 'error');
+    showMessage(err.message);
   } finally {
     searchBtn.disabled = false;
   }
@@ -259,77 +227,53 @@ async function handleSearch() {
 
 async function handleLocation() {
   clearMessage();
-  if (!navigator.geolocation) {
-    showMessage('Geolocation not supported in this browser', 'error');
-    return;
-  }
-  try {
-    locationBtn.disabled = true;
-    navigator.geolocation.getCurrentPosition(async (pos) => {
-      try {
-        const lat = pos.coords.latitude;
-        const lon = pos.coords.longitude;
-        const weather = await fetchWeatherByLatLon(lat, lon);
-        renderCurrent(weather, `Your location`);
-        renderForecast(weather);
-      } catch (err) {
-        showMessage('Failed to fetch weather for current location', 'error');
-      } finally {
-        locationBtn.disabled = false;
+
+  if (!navigator.geolocation) return showMessage("Geolocation not supported");
+
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+
+    try {
+      const current = await fetchCurrentWeather(lat, lon);
+      const forecast = await fetchForecast(lat, lon);
+
+      renderCurrentWeather(current, "Your location");
+      renderForecast(forecast);
+
+      // ✅ Save the real city name to recent searches
+      if (current.name) {
+        saveToRecent(`${current.name}, ${current.sys.country}`);
       }
-    }, (err) => {
-      showMessage('Permission denied or unable to get location', 'error');
-      locationBtn.disabled = false;
-    }, { enableHighAccuracy: false, maximumAge: 120000 });
-  } catch (err) {
-    showMessage('Error fetching current location', 'error');
-    locationBtn.disabled = false;
-  }
+
+    } catch {
+      showMessage("Failed to load your weather");
+    }
+  });
 }
+
 
 function handleUnitToggle() {
-  if (!currentData) {
-    showMessage('No weather loaded to toggle unit', 'error');
-    return;
-  }
+  if (!currentData) return showMessage("No weather loaded");
+
   isMetric = !isMetric;
-  const tempC = currentData.current.temp;
+  const tempC = currentData.main.temp;
+
   tempToday.textContent = isMetric ? round(tempC) : round(cToF(tempC));
-  tempUnit.textContent = isMetric ? '°C' : '°F';
-  unitToggle.setAttribute('aria-pressed', (!isMetric).toString());
-}
-
-async function handleRecentChange() {
-  const city = recentDropdown.value;
-  if (!city) return;
-  cityInput.value = city;
-  await handleSearch();
-}
-
-/* ---------- Validation ---------- */
-function validateCityInput(txt) {
-  if (!txt || txt.trim().length === 0) return false;
-  // allow letters, spaces, hyphens, commas, periods
-  return /^[a-zA-Z\s\-,.]+$/.test(txt);
+  tempUnit.textContent = isMetric ? "°C" : "°F";
 }
 
 /* ---------- Listeners ---------- */
-searchBtn.addEventListener('click', async () => {
-  if (!validateCityInput(cityInput.value)) {
-    showMessage('Invalid city name. Use letters, spaces, commas only.', 'error');
-    return;
+searchBtn.addEventListener("click", handleSearch);
+cityInput.addEventListener("keydown", e => (e.key === "Enter" ? handleSearch() : null));
+locationBtn.addEventListener("click", handleLocation);
+unitToggle.addEventListener("click", handleUnitToggle);
+recentDropdown.addEventListener("change", () => {
+  if (recentDropdown.value) {
+    cityInput.value = recentDropdown.value;
+    handleSearch();
   }
-  await handleSearch();
 });
-
-cityInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') searchBtn.click(); });
-
-locationBtn.addEventListener('click', handleLocation);
-unitToggle.addEventListener('click', handleUnitToggle);
-recentDropdown.addEventListener('change', handleRecentChange);
 
 /* ---------- Init ---------- */
 loadRecentCities();
-
-/* ---------- Helper: Celsius to Fahrenheit ---------- */
-function cToF(c) { return (c * 9/5) + 32; }
